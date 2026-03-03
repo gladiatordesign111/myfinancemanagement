@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IML Profit Dashboard Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+--bg:#0b1120;
+--card:#111827;
+--card2:#1f2937;
+--accent:#3b82f6;
+--green:#10b981;
+--red:#ef4444;
+--text:#f3f4f6;
+--muted:#9ca3af;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',sans-serif;background:linear-gradient(135deg,#0b1120,#111827);color:var(--text);}
+.header{background:#0f172a;padding:20px 40px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+.header h1{margin:0;font-size:22px;font-weight:700;letter-spacing:1px;}
+.container{max-width:1300px;margin:auto;padding:30px;display:flex;flex-direction:column;gap:25px;}
+.card{background:var(--card);padding:25px;border-radius:16px;box-shadow:0 8px 25px rgba(0,0,0,.4);}
+.flex{display:flex;flex-wrap:wrap;gap:15px;align-items:center;}
+input,select,button{padding:12px 14px;border-radius:10px;border:none;font-size:14px;}
+input,select{background:var(--card2);color:white;}
+button{cursor:pointer;font-weight:600;}
+.btn-primary{background:var(--accent);color:white;}
+.btn-green{background:var(--green);color:white;}
+.btn-red{background:var(--red);color:white;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;}
+.stat-box{background:linear-gradient(145deg,#1f2937,#111827);padding:30px;border-radius:16px;box-shadow:0 8px 25px rgba(0,0,0,.4);}
+.stat-box h2{margin:0;font-size:28px;}
+.stat-box p{margin:8px 0 0;color:var(--muted);}
+.month-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:15px;margin-top:20px;}
+.month{background:var(--card2);padding:15px;border-radius:12px;text-align:center;}
+.month h4{margin:5px 0;color:var(--muted);font-size:13px;}
+.month p{margin:0;font-weight:600;color:var(--green);}
+table{width:100%;border-collapse:collapse;margin-top:20px;}
+th,td{padding:12px;text-align:center;}
+th{background:var(--card2);}
+tr:nth-child(even){background:#1a2233;}
+@media(max-width:768px){.flex{flex-direction:column;}}
+.inline-input{background:#1f2937;color:white;border:none;width:80px;text-align:center;}
+.inline-input:focus{outline:none;background:#334155;}
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>IML FINANCE DASHBOARD</h1>
+</div>
+
+<div class="container">
+
+<div class="card flex">
+<input type="date" id="date">
+<input type="number" id="profit" placeholder="Rbah (DH)">
+<input type="number" id="capital" placeholder="Ras lmal (DH)">
+<button class="btn-primary" onclick="addEntry()">Ajouter</button>
+<select id="yearSelect" onchange="render()"></select>
+<button id="toggleBtn" class="btn-green" onclick="toggleSection()">Show</button>
+</div>
+
+<div class="stats">
+<div class="stat-box">
+<h2 id="totalProfit">0 DH</h2>
+<p>Total Profit (Current Month)</p>
+</div>
+<div class="stat-box">
+<h2 id="totalCapital">0 DH</h2>
+<p>Total Capital (Current Month)</p>
+<button class="btn-red" style="margin-top:15px" onclick="resetCapital()">Reset Capital</button>
+</div>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">🎯 Monthly Target</h3>
+<div style="display:flex;gap:15px;align-items:center;flex-wrap:wrap;margin-bottom:15px">
+<input type="number" id="targetInput" placeholder="Set Target (DH)" value="5000">
+<button class="btn-primary" onclick="updateTarget()">Save Target</button>
+</div>
+<div style="background:#1f2937;border-radius:30px;overflow:hidden;height:25px">
+<div id="progressBar" style="height:100%;width:0%;transition:0.6s"></div>
+</div>
+<p id="progressText" style="margin-top:10px;font-weight:600"></p>
+</div>
+
+<div id="detailsSection" style="display:none">
+<div class="card">
+<div class="month-grid" id="monthlyDashboard"></div>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Profit</th>
+<th>Capital</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<script>
+
+let data = JSON.parse(localStorage.getItem("yearProfitData")) || []
+let visible = false
+let target = parseFloat(localStorage.getItem("profitTarget")) || 5000
+document.getElementById("targetInput").value = target
+
+const dateInput=document.getElementById("date")
+const profitInput=document.getElementById("profit")
+const capitalInput=document.getElementById("capital")
+const yearSelect=document.getElementById("yearSelect")
+
+function formatNumber(n){
+n=parseFloat(n||0)
+return n%1===0?n+" DH":n.toFixed(2)+" DH"
+}
+
+function populateYears(){
+let years=[...new Set(data.map(d=>d.year))]
+if(years.length===0)years=[new Date().getFullYear().toString()]
+yearSelect.innerHTML=""
+years.sort().forEach(y=>{
+yearSelect.innerHTML+=`<option value="${y}">${y}</option>`
+})
+}
+
+function toggleSection(){
+visible=!visible
+document.getElementById("detailsSection").style.display=visible?"block":"none"
+document.getElementById("toggleBtn").innerText=visible?"Hide":"Show"
+document.getElementById("toggleBtn").className=visible?"btn-red":"btn-green"
+render()
+}
+
+function addEntry(){
+const date=dateInput.value
+if(!date)return alert("Choisir une date")
+const profit=parseFloat(profitInput.value)
+const capital=parseFloat(capitalInput.value)
+if(isNaN(profit)||isNaN(capital))return alert("Nombre invalide")
+const year=date.slice(0,4)
+const month=date.slice(5,7)
+data.push({id:Date.now(),date,year,month,profit,capital})
+localStorage.setItem("yearProfitData",JSON.stringify(data))
+dateInput.value="";profitInput.value="";capitalInput.value=""
+populateYears()
+yearSelect.value=year
+render()
+}
+
+function render(){
+
+const selectedYear=yearSelect.value
+const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0")
+
+// CURRENT MONTH ONLY
+const filtered=data.filter(d=>d.year===selectedYear && d.month===currentMonth)
+
+const totalProfit=filtered.reduce((a,b)=>a+b.profit,0)
+const totalCapital=filtered.reduce((a,b)=>a+b.capital,0)
+
+document.getElementById("totalProfit").innerText=formatNumber(totalProfit)
+document.getElementById("totalCapital").innerText=formatNumber(totalCapital)
+
+// Year monthly grid (normal)
+const months=["Jan","Fev","Mar","Avr","Mai","Jun","Jul","Aou","Sep","Oct","Nov","Dec"]
+const dash=document.getElementById("monthlyDashboard")
+dash.innerHTML=""
+
+for(let i=1;i<=12;i++){
+const m=i.toString().padStart(2,"0")
+const mp=data.filter(d=>d.year===selectedYear && d.month===m)
+.reduce((a,b)=>a+b.profit,0)
+
+dash.innerHTML+=`
+<div class="month">
+<h4>${months[i-1]}</h4>
+<p>${formatNumber(mp)}</p>
+</div>`
+}
+
+const body=document.getElementById("tableBody")
+body.innerHTML=""
+filtered.forEach(d=>{
+body.innerHTML+=`
+<tr>
+<td>${d.date.split("-").reverse().join("/")}</td>
+<td><input type="number" class="inline-input" value="${d.profit}" onchange="updateProfit(${d.id},this.value)"></td>
+<td><input type="number" class="inline-input" value="${d.capital}" onchange="updateCapital(${d.id},this.value)"></td>
+<td><button class="btn-red" onclick="deleteEntry(${d.id})">Delete</button></td>
+</tr>`
+})
+
+let percent=target>0?(totalProfit/target)*100:0
+if(percent>100)percent=100
+
+const bar=document.getElementById("progressBar")
+bar.style.width=percent+"%"
+bar.style.background=percent<40?"#ef4444":(percent<80?"#f59e0b":"#10b981")
+
+document.getElementById("progressText").innerText=
+`Progress: ${percent.toFixed(1)}% (${formatNumber(totalProfit)} / ${formatNumber(target)})`
+}
+
+function updateProfit(id,v){
+const item=data.find(d=>d.id===id)
+if(item)item.profit=parseFloat(v)||0
+localStorage.setItem("yearProfitData",JSON.stringify(data))
+render()
+}
+
+function updateCapital(id,v){
+const item=data.find(d=>d.id===id)
+if(item)item.capital=parseFloat(v)||0
+localStorage.setItem("yearProfitData",JSON.stringify(data))
+render()
+}
+
+function deleteEntry(id){
+data=data.filter(d=>d.id!==id)
+localStorage.setItem("yearProfitData",JSON.stringify(data))
+render()
+}
+
+function resetCapital(){
+const y=yearSelect.value
+const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0")
+data.forEach(d=>{
+if(d.year===y && d.month===currentMonth)d.capital=0
+})
+localStorage.setItem("yearProfitData",JSON.stringify(data))
+render()
+}
+
+function updateTarget(){
+target=parseFloat(document.getElementById("targetInput").value)||0
+localStorage.setItem("profitTarget",target)
+render()
+}
+
+populateYears()
+yearSelect.value=new Date().getFullYear().toString()
+render()
+
+</script>
+</body>
+</html>
