@@ -106,151 +106,245 @@ tr:nth-child(even){background:#1a2233;}
 </div>
 
 </div>
+<script type="module">
 
-<script>
+// ===== IMPORT FIREBASE =====
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { 
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  deleteDoc,
+  updateDoc,
+  doc,
+  getDoc,
+  setDoc
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-let data = JSON.parse(localStorage.getItem("yearProfitData")) || []
-let visible = false
-let target = parseFloat(localStorage.getItem("profitTarget")) || 5000
-document.getElementById("targetInput").value = target
+// ===== YOUR CONFIG (UNCHANGED) =====
+const firebaseConfig = {
+  apiKey: "AIzaSyDj7ZOQQPMdBfAp0pcqOeYDOyX4plqMuek",
+  authDomain: "finance-manager-b8a72.firebaseapp.com",
+  projectId: "finance-manager-b8a72",
+  storageBucket: "finance-manager-b8a72.firebasestorage.app",
+  messagingSenderId: "722057604922",
+  appId: "1:722057604922:web:6144fbcf854e0389f0aa03",
+  measurementId: "G-VRC7DESEDS"
+};
 
-const dateInput=document.getElementById("date")
-const profitInput=document.getElementById("profit")
-const capitalInput=document.getElementById("capital")
-const yearSelect=document.getElementById("yearSelect")
+// ===== INIT =====
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ===== GLOBAL STATE =====
+let data = [];
+let visible = false;
+let target = 5000;
+
+const dateInput = document.getElementById("date");
+const profitInput = document.getElementById("profit");
+const capitalInput = document.getElementById("capital");
+const yearSelect = document.getElementById("yearSelect");
 
 function formatNumber(n){
-n=parseFloat(n||0)
-return n%1===0?n+" DH":n.toFixed(2)+" DH"
+  n=parseFloat(n||0);
+  return n%1===0?n+" DH":n.toFixed(2)+" DH";
 }
 
-function populateYears(){
-let years=[...new Set(data.map(d=>d.year))]
-if(years.length===0)years=[new Date().getFullYear().toString()]
-yearSelect.innerHTML=""
-years.sort().forEach(y=>{
-yearSelect.innerHTML+=`<option value="${y}">${y}</option>`
-})
+// ===== FIRESTORE =====
+
+async function loadTarget(){
+  const ref = doc(db, "settings", "main");
+  const snap = await getDoc(ref);
+
+  if(snap.exists()){
+    target = snap.data().profitTarget || 5000;
+  }else{
+    await setDoc(ref, { profitTarget: 5000 });
+  }
+
+  document.getElementById("targetInput").value = target;
 }
 
-function toggleSection(){
-visible=!visible
-document.getElementById("detailsSection").style.display=visible?"block":"none"
-document.getElementById("toggleBtn").innerText=visible?"Hide":"Show"
-document.getElementById("toggleBtn").className=visible?"btn-red":"btn-green"
-render()
+async function updateTarget(){
+  target = parseFloat(document.getElementById("targetInput").value) || 0;
+  await setDoc(doc(db,"settings","main"), { profitTarget: target });
+  render();
 }
 
-function addEntry(){
-const date=dateInput.value
-if(!date)return alert("Choisir une date")
-const profit=parseFloat(profitInput.value)
-const capital=parseFloat(capitalInput.value)
-if(isNaN(profit)||isNaN(capital))return alert("Nombre invalide")
-const year=date.slice(0,4)
-const month=date.slice(5,7)
-data.push({id:Date.now(),date,year,month,profit,capital})
-localStorage.setItem("yearProfitData",JSON.stringify(data))
-dateInput.value="";profitInput.value="";capitalInput.value=""
-populateYears()
-yearSelect.value=year
-render()
+async function fetchYears(){
+  const snaps = await getDocs(collection(db,"entries"));
+  const years = new Set();
+  snaps.forEach(s => years.add(s.data().year));
+  return [...years];
 }
 
-function render(){
-
-const selectedYear=yearSelect.value
-const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0")
-
-// CURRENT MONTH ONLY
-const filtered=data.filter(d=>d.year===selectedYear && d.month===currentMonth)
-
-const totalProfit=filtered.reduce((a,b)=>a+b.profit,0)
-const totalCapital=filtered.reduce((a,b)=>a+b.capital,0)
-
-document.getElementById("totalProfit").innerText=formatNumber(totalProfit)
-document.getElementById("totalCapital").innerText=formatNumber(totalCapital)
-
-// Year monthly grid (normal)
-const months=["Jan","Fev","Mar","Avr","Mai","Jun","Jul","Aou","Sep","Oct","Nov","Dec"]
-const dash=document.getElementById("monthlyDashboard")
-dash.innerHTML=""
-
-for(let i=1;i<=12;i++){
-const m=i.toString().padStart(2,"0")
-const mp=data.filter(d=>d.year===selectedYear && d.month===m)
-.reduce((a,b)=>a+b.profit,0)
-
-dash.innerHTML+=`
-<div class="month">
-<h4>${months[i-1]}</h4>
-<p>${formatNumber(mp)}</p>
-</div>`
+async function fetchEntries(year){
+  const q = query(
+    collection(db,"entries"),
+    where("year","==",year),
+    orderBy("date","asc")
+  );
+  const snaps = await getDocs(q);
+  return snaps.docs.map(d => ({ id:d.id, ...d.data() }));
 }
 
-const body=document.getElementById("tableBody")
-body.innerHTML=""
-filtered.forEach(d=>{
-body.innerHTML+=`
-<tr>
-<td>${d.date.split("-").reverse().join("/")}</td>
-<td><input type="number" class="inline-input" value="${d.profit}" onchange="updateProfit(${d.id},this.value)"></td>
-<td><input type="number" class="inline-input" value="${d.capital}" onchange="updateCapital(${d.id},this.value)"></td>
-<td><button class="btn-red" onclick="deleteEntry(${d.id})">Delete</button></td>
-</tr>`
-})
+async function addEntry(){
+  const date=dateInput.value;
+  if(!date) return alert("Choisir une date");
 
-let percent=target>0?(totalProfit/target)*100:0
-if(percent>100)percent=100
+  const profit=parseFloat(profitInput.value);
+  const capital=parseFloat(capitalInput.value);
+  if(isNaN(profit)||isNaN(capital)) return alert("Nombre invalide");
 
-const bar=document.getElementById("progressBar")
-bar.style.width=percent+"%"
-bar.style.background=percent<40?"#ef4444":(percent<80?"#f59e0b":"#10b981")
+  const year=date.slice(0,4);
+  const month=date.slice(5,7);
 
-document.getElementById("progressText").innerText=
-`Progress: ${percent.toFixed(1)}% (${formatNumber(totalProfit)} / ${formatNumber(target)})`
+  await addDoc(collection(db,"entries"),{
+    date,year,month,profit,capital
+  });
+
+  dateInput.value="";
+  profitInput.value="";
+  capitalInput.value="";
+
+  await populateYears();
+  yearSelect.value=year;
+  render();
 }
 
-function updateProfit(id,v){
-const item=data.find(d=>d.id===id)
-if(item)item.profit=parseFloat(v)||0
-localStorage.setItem("yearProfitData",JSON.stringify(data))
-render()
+async function updateProfit(id,v){
+  await updateDoc(doc(db,"entries",id),{
+    profit: parseFloat(v)||0
+  });
+  render();
 }
 
-function updateCapital(id,v){
-const item=data.find(d=>d.id===id)
-if(item)item.capital=parseFloat(v)||0
-localStorage.setItem("yearProfitData",JSON.stringify(data))
-render()
+async function updateCapital(id,v){
+  await updateDoc(doc(db,"entries",id),{
+    capital: parseFloat(v)||0
+  });
+  render();
 }
 
-function deleteEntry(id){
-data=data.filter(d=>d.id!==id)
-localStorage.setItem("yearProfitData",JSON.stringify(data))
-render()
+async function deleteEntry(id){
+  await deleteDoc(doc(db,"entries",id));
+  render();
 }
 
-function resetCapital(){
-const y=yearSelect.value
-const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0")
-data.forEach(d=>{
-if(d.year===y && d.month===currentMonth)d.capital=0
-})
-localStorage.setItem("yearProfitData",JSON.stringify(data))
-render()
+async function resetCapital(){
+  const y=yearSelect.value;
+  const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0");
+
+  const q=query(
+    collection(db,"entries"),
+    where("year","==",y),
+    where("month","==",currentMonth)
+  );
+
+  const snaps=await getDocs(q);
+  snaps.forEach(async d=>{
+    await updateDoc(d.ref,{ capital:0 });
+  });
+
+  render();
 }
 
-function updateTarget(){
-target=parseFloat(document.getElementById("targetInput").value)||0
-localStorage.setItem("profitTarget",target)
-render()
+// ===== UI =====
+
+async function populateYears(){
+  let years=await fetchYears();
+  if(years.length===0)
+    years=[new Date().getFullYear().toString()];
+
+  yearSelect.innerHTML="";
+  years.sort().forEach(y=>{
+    yearSelect.innerHTML+=`<option value="${y}">${y}</option>`;
+  });
 }
 
-populateYears()
-yearSelect.value=new Date().getFullYear().toString()
-render()
+async function render(){
+
+  const selectedYear=yearSelect.value;
+  const currentMonth=(new Date().getMonth()+1).toString().padStart(2,"0");
+
+  data=await fetchEntries(selectedYear);
+
+  const filtered=data.filter(d=>d.month===currentMonth);
+
+  const totalProfit=filtered.reduce((a,b)=>a+b.profit,0);
+  const totalCapital=filtered.reduce((a,b)=>a+b.capital,0);
+
+  document.getElementById("totalProfit").innerText=formatNumber(totalProfit);
+  document.getElementById("totalCapital").innerText=formatNumber(totalCapital);
+
+  const months=["Jan","Fev","Mar","Avr","Mai","Jun","Jul","Aou","Sep","Oct","Nov","Dec"];
+  const dash=document.getElementById("monthlyDashboard");
+  dash.innerHTML="";
+
+  for(let i=1;i<=12;i++){
+    const m=i.toString().padStart(2,"0");
+    const mp=data.filter(d=>d.month===m)
+      .reduce((a,b)=>a+b.profit,0);
+
+    dash.innerHTML+=`
+      <div class="month">
+        <h4>${months[i-1]}</h4>
+        <p>${formatNumber(mp)}</p>
+      </div>`;
+  }
+
+  const body=document.getElementById("tableBody");
+  body.innerHTML="";
+
+  filtered.forEach(d=>{
+    body.innerHTML+=`
+      <tr>
+        <td>${d.date.split("-").reverse().join("/")}</td>
+        <td><input type="number" class="inline-input"
+            value="${d.profit}"
+            onchange="updateProfit('${d.id}',this.value)"></td>
+        <td><input type="number" class="inline-input"
+            value="${d.capital}"
+            onchange="updateCapital('${d.id}',this.value)"></td>
+        <td><button class="btn-red"
+            onclick="deleteEntry('${d.id}')">Delete</button></td>
+      </tr>`;
+  });
+
+  let percent=target>0?(totalProfit/target)*100:0;
+  if(percent>100) percent=100;
+
+  const bar=document.getElementById("progressBar");
+  bar.style.width=percent+"%";
+  bar.style.background=
+    percent<40?"#ef4444":
+    percent<80?"#f59e0b":"#10b981";
+
+  document.getElementById("progressText").innerText=
+    `Progress: ${percent.toFixed(1)}% (${formatNumber(totalProfit)} / ${formatNumber(target)})`;
+}
+
+// expose functions to HTML buttons
+window.addEntry=addEntry;
+window.updateProfit=updateProfit;
+window.updateCapital=updateCapital;
+window.deleteEntry=deleteEntry;
+window.resetCapital=resetCapital;
+window.updateTarget=updateTarget;
+window.render=render;
+
+// start
+await loadTarget();
+await populateYears();
+yearSelect.value=new Date().getFullYear().toString();
+render();
 
 </script>
 </body>
+
 </html>
